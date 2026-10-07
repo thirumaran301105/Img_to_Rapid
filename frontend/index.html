@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot image drawing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#e8ebee;--panel:#f6f7f8;--ink:#17202b;--steel:#5a6672;--line:#c6ccd3;--signal:#d9111c;--paper:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#171c22;--panel:#202730;--ink:#e9edf1;--steel:#9aa6b2;--line:#364150;--paper:#f4f5f6}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Archivo,"Helvetica Neue",Arial,sans-serif}
+main{display:grid;grid-template-columns:360px 1fr;gap:20px;max-width:1200px;margin:0 auto;padding:24px}
+h1{font:800 28px/1.1 Archivo,sans-serif;font-stretch:80%;margin:0 0 16px}
+aside,section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:20px}
+fieldset{border:0;padding:0;margin:0 0 18px}
+legend,label.t{font-weight:700;margin-bottom:6px;display:block;padding:0}
+.robot{display:flex;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:4px;margin-bottom:6px;cursor:pointer}
+.robot:has(input:checked){border-color:var(--ink);background:var(--paper);color:#17202b}
+.robot small{display:block;color:var(--steel)}
+input[type=file],select,input[type=range]{width:100%}
+select,input[type=file]{padding:8px;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:#17202b}
+button{font:700 15px Archivo,sans-serif;padding:10px 14px;border-radius:4px;border:1px solid var(--ink);background:transparent;color:var(--ink);cursor:pointer;margin:0 6px 6px 0}
+button.primary{background:var(--ink);color:var(--bg)}
+button.send{background:var(--signal);border-color:var(--signal);color:#fff}
+button:disabled{opacity:.4;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--signal);outline-offset:2px}
+canvas{width:100%;display:block;background:var(--paper);border:1px solid var(--line);border-radius:2px}
+#stats{margin:12px 0;color:var(--steel)}
+#joints{font-variant-numeric:tabular-nums;color:var(--steel);margin-top:8px}
+#cadStatus{color:var(--steel);font-size:14px;margin:6px 0 0}
+details{border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin-bottom:10px}
+summary{font-weight:700;cursor:pointer}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.g2 label,details>label{font-size:14px;display:block}
+details input[type=number],details input[type=text],details textarea,details select{width:100%;padding:6px;border:1px solid var(--line);border-radius:4px;background:var(--paper);color:#17202b;font:inherit}
+.hint,#pasteInfo{color:var(--steel);font-size:13px;margin:8px 0 0}
+#msg{min-height:1.5em;font-weight:600}
+#empty{padding:80px 20px;text-align:center;color:var(--steel)}
+@media (max-width:820px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<aside>
+  <h1>Robot image drawing</h1>
+  <fieldset><legend>Robot</legend><div id="robots"></div></fieldset>
+  <fieldset><label class="t" for="file">Image</label><input id="file" type="file" accept="image/*"></fieldset>
+  <fieldset>
+    <label class="t" for="mode">Line style</label>
+    <select id="mode">
+      <option value="lines">Lines: drawings, text, logos</option>
+      <option value="outline">Outline: solid shapes</option>
+      <option value="edges">Edges: photos (outlines only)</option>
+      <option value="shade">Shading: photos (hatching, slow)</option>
+    </select>
+  </fieldset>
+  <fieldset><label class="t" for="pen">Pen width (mm)</label><input id="pen" type="number" min="0.2" max="3" step="0.1" value="0.6" style="width:100%;padding:8px"></fieldset>
+  <fieldset><label class="t" for="detail">Detail</label><input id="detail" type="range" min="0" max="1" step="0.05" value="0.5"></fieldset>
+  <details open>
+    <summary>Paper and placement</summary>
+    <div class="g2">
+      <label>Width (mm)<input id="s_page_w" type="number" min="20" step="1"></label>
+      <label>Height (mm)<input id="s_page_h" type="number" min="20" step="1"></label>
+      <label>Margin (mm)<input id="s_margin" type="number" min="0" step="1"></label>
+      <label>Page right runs along<select id="s_right"><option value="+X">work object +X</option><option value="-X">work object -X</option><option value="+Y">work object +Y</option><option value="-Y">work object -Y</option></select></label>
+      <label>Bottom-left corner X (mm)<input id="s_ox" type="number" step="1"></label>
+      <label>Bottom-left corner Y (mm)<input id="s_oy" type="number" step="1"></label>
+    </div>
+    <p class="hint">Look down at the paper. Pick the work object axis that runs left to right, then say where the page's bottom-left corner is in work object millimetres. Use the test pattern to check.</p>
+  </details>
+  <details>
+    <summary>Tool and work object</summary>
+    <label for="s_paste">Paste lines from your RAPID (optional)</label>
+    <textarea id="s_paste" rows="5" placeholder="PERS tooldata tcp := ...&#10;PERS wobjdata Plywood := ...&#10;CONST robtarget ... (axis configuration only)"></textarea>
+    <p id="pasteInfo">Pasting your tooldata and wobjdata sets the names, tool length and which way the work object's Z points (this decides the tool direction and the pen-up direction).</p>
+    <div class="g2">
+      <label>Tool and work object<select id="s_declare"><option value="auto">Auto</option><option value="declare">Define in the program</option><option value="existing">Already on the controller</option></select></label>
+      <label>Extra tool yaw<select id="s_tool_yaw"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></label>
+      <label>Taught target is in<select id="s_target_frame"><option value="auto">Auto</option><option value="base">Base frame</option><option value="wobj">Work object</option></select></label>
+      <label>Tool name (override)<input id="s_tool_name" type="text" placeholder="from paste"></label>
+      <label>Work object name (override)<input id="s_wobj_name" type="text" placeholder="from paste"></label>
+      <label>Tool length (mm)<input id="s_pen_len" type="number" step="0.1" placeholder="from tool data"></label>
+    </div>
+  </details>
+  <details>
+    <summary>Speed and pen</summary>
+    <div class="g2">
+      <label>Draw speed (mm/s)<input id="s_draw_speed" type="number" min="1" step="1"></label>
+      <label>Travel speed (mm/s)<input id="s_travel_speed" type="number" min="1" step="1"></label>
+      <label>Touch-down speed (mm/s)<input id="s_approach_speed" type="number" min="1" step="1"></label>
+      <label>Corner zone<select id="s_zone"><option value="z0">z0 (sharpest)</option><option value="z1">z1</option><option value="z5">z5</option><option value="z10">z10</option><option value="fine">fine (stop each point)</option></select></label>
+      <label>Pen lift (mm)<input id="s_pen_up" type="number" min="1" step="1"></label>
+      <label>Pen pressure (mm below paper)<input id="s_press" type="number" min="0" step="0.5"></label>
+      <label>Dry run height (mm, 0 = off)<input id="s_dry" type="number" min="0" step="1"></label>
+      <label>Accuracy (mm, blank = auto)<input id="s_tol" type="number" min="0.02" step="0.01" placeholder="auto"></label>
+      <label>Controller moves per second<input id="s_rate" type="number" min="5" step="5"></label>
+    </div>
+    <p class="hint">Dry run keeps the pen in the air above the paper, so you can watch the whole drawing before it touches anything.</p>
+  </details>
+  <details>
+    <summary>Program</summary>
+    <div class="g2">
+      <label>Routine name<input id="s_routine" type="text"></label>
+      <label>Home routine (optional)<input id="s_home_routine" type="text" placeholder="e.g. Home10"></label>
+      <label>Home joints (blank = none)<input id="s_home_joints" type="text" placeholder="0,0,0,0,30,0"></label>
+      <label>Axis config cf1,cf4,cf6,cfx<input id="s_conf" type="text" placeholder="from paste, or 0,0,0,0"></label>
+    </div>
+    <label style="margin-top:8px"><input type="checkbox" id="s_strict"> Keep this axis configuration strictly (ConfL On)</label>
+  </details>
+  <fieldset>
+    <legend>Robot CAD (optional)</legend>
+    <input id="cad" type="file" accept=".stl,.glb,.gltf" multiple aria-label="CAD files for the selected robot">
+    <label class="t" for="cadFrame">Part coordinates</label>
+    <select id="cadFrame"><option value="assembly">Exported in robot zero pose</option><option value="link">Each part in its joint frame</option></select>
+    <label class="t" for="cadScale">Units</label>
+    <select id="cadScale"><option value="1">Millimetres</option><option value="1000">Metres</option></select>
+    <p id="cadStatus">Name files base, link1 to link6 (STL or GLB). Or put them in frontend/robots/&lt;robot&gt;/.</p>
+  </fieldset>
+  <button id="preview" class="primary">Preview toolpath</button>
+  <button id="testpat">Test pattern (F and border)</button>
+</aside>
+<section>
+  <div id="empty">Choose a robot and an image, then preview the toolpath.</div>
+  <canvas id="stage" hidden aria-label="Toolpath preview on the robot's paper area"></canvas>
+  <div id="sim" hidden></div>
+  <div id="joints" aria-live="off"></div>
+  <label><input type="checkbox" id="overlay" checked> Show the original image under the toolpath</label>
+  <div id="stats"></div>
+  <div>
+    <button id="replay" disabled>Replay toolpath</button>
+    <button id="simulate" class="primary" disabled>Simulate robot</button>
+    <button id="resetView" disabled>Reset 3D view</button>
+    <a id="dl" hidden><button>Download RAPID file</button></a>
+    <button id="send" class="send" disabled>Send to robot</button>
+    <button id="start" disabled>Start drawing</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <p id="msg" role="status" aria-live="polite"></p>
+  <small>3D view: left-drag rotates, right-drag or Shift-drag pans, wheel zooms, double-click resets.</small>
+</section>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="kin.js"></script>
+<script src="sim.js"></script>
+<script>
+let ROBOTS=[];
+const $=s=>document.querySelector(s);
+const reduced=matchMedia('(prefers-reduced-motion:reduce)').matches;
+let job=null,N=0;
+const msg=t=>$('#msg').textContent=t;
+const selected=()=>document.querySelector('input[name=robot]:checked').value;
+
+fetch('/api/robots').then(r=>r.json()).then(list=>{
+  ROBOTS=list;setTimeout(loadSettings,0);
+  $('#robots').innerHTML=list.map((r,i)=>`<label class="robot"><input type="radio" name="robot" value="${r.id}" ${i?'':'checked'}><span><b>${r.name}</b><small>Reach ${r.reach_mm} mm, paper ${r.area_w} x ${r.area_h} mm${r.exact?'':', simulation model pending'}</small></span></label>`).join('');
+});
+
+function draw(p){
+  const c=$('#stage'),{w,h}=job.area,dpr=devicePixelRatio||1,W=c.parentElement.clientWidth,H=W*h/w;
+  c.width=W*dpr;c.height=H*dpr;c.style.height=H+'px';
+  const x=c.getContext('2d'),k=W*dpr/w;
+  x.setTransform(k,0,0,-k,0,H*dpr);x.lineJoin=x.lineCap='round';
+  if($('#overlay').checked&&job.img&&job.img.complete&&job.box){const b=job.box;x.save();x.globalAlpha=.3;x.translate(b.x,b.y+b.h);x.scale(1,-1);x.drawImage(job.img,0,0,b.w,b.h);x.restore();}
+  let left=Math.floor(p*N),prev=null,tip=null;
+  for(const s of job.strokes){
+    if(left<=0)break;
+    if(prev){x.beginPath();x.setLineDash([2,2]);x.strokeStyle='#9aa6b2';x.lineWidth=.3;x.moveTo(...prev);x.lineTo(...s[0]);x.stroke();}
+    const n=Math.min(left,s.length);left-=n;
+    x.setLineDash([]);x.strokeStyle='#17202b';x.lineWidth=.7;x.beginPath();
+    s.slice(0,n).forEach((q,i)=>i?x.lineTo(...q):x.moveTo(...q));x.stroke();
+    prev=s[n-1];tip=prev;
+  }
+  if(tip&&p<1){x.fillStyle='#d9111c';x.beginPath();x.arc(tip[0],tip[1],1.6,0,7);x.fill();}
+}
+
+function afterJob(j,file){
+  job=j;job.robot_id=selected();job.img=null;
+  if(file){job.img=new Image();job.img.onload=()=>draw(1);job.img.src=URL.createObjectURL(file);}
+  N=j.strokes.reduce((a,s)=>a+s.length,0);
+  $('#empty').hidden=true;$('#stage').hidden=false;draw(1);
+  const s=j.stats;
+  const ds=+$('#s_draw_speed').value;
+  $('#stats').textContent=`${s.strokes} strokes, ${s.moves} moves (lines and arcs), about ${s.avg_move_mm} mm per move, ${s.draw_mm} mm drawn, about ${Math.ceil(s.est_seconds/60)} min. Path tolerance ${j.info.tol_mm} mm.`+(s.controller_limit<ds?` At this move length the controller can sustain about ${s.controller_limit} mm/s, below your ${ds} mm/s setting: raise the accuracy tolerance or lower the detail to go faster.`:'');
+  $('#pasteInfo').textContent=(j.notes||[]).join(' ');
+  $('#dl').hidden=false;$('#dl').href=`/api/jobs/${j.job_id}/program.mod`;
+  ['replay','simulate'].forEach(i=>$('#'+i).disabled=false);
+  $('#resetView').disabled=true;
+  ['send','start','stop'].forEach(i=>$('#'+i).disabled=true);
+  const rb=ROBOTS.find(r=>r.id===job.robot_id);let m;
+  if(!rb.exact)m='This robot has no simulation model yet. You can still download the RAPID file.';
+  else if(!rb.verified)m='GoFa visualization uses approximate geometry. Simulation is available, but sending to a robot remains locked until the model is calibrated.';
+  else if(j.reach&&!j.reach.ok)m='Check before sending: '+j.reach.issues.join('; ')+'. Move the page placement or use a smaller page.';
+  else m='Run the robot simulation first. Sending to the real robot unlocks after it finishes.';
+  msg((j.warnings||[]).map(w=>'Warning: '+w).concat([m]).join(' '));
+}
+async function submit(url,fd,file){
+  msg('Building toolpath...');
+  const r=await fetch(url,{method:'POST',body:fd}),j=await r.json();
+  if(!r.ok)return msg(j.detail||'Request failed.');
+  afterJob(j,file);
+}
+$('#preview').onclick=()=>{
+  const f=$('#file').files[0];if(!f)return msg('Choose an image first.');
+  const fd=new FormData();fd.append('image',f);fd.append('robot_id',selected());
+  fd.append('mode',$('#mode').value);fd.append('detail',$('#detail').value);fd.append('pen_mm',$('#pen').value);
+  fd.append('settings',JSON.stringify(collectSettings()));
+  submit('/api/preview',fd,f);
+};
+$('#testpat').onclick=()=>{
+  const fd=new FormData();fd.append('robot_id',selected());fd.append('settings',JSON.stringify(collectSettings()));
+  submit('/api/test-pattern',fd,null);
+};
+const SET=['tol','rate','target_frame','page_w','page_h','margin','right','ox','oy','paste','declare','tool_name','wobj_name','pen_len','tool_yaw','draw_speed','travel_speed','approach_speed','zone','pen_up','press','dry','routine','home_routine','home_joints','conf'];
+function robotDefaults(id){const d=ROBOTS.find(x=>x.id===id).defaults;
+  return {page_w:d.page_w,page_h:d.page_h,margin:d.margin,right:'+X',ox:0,oy:0,paste:'',declare:'auto',tool_name:'',wobj_name:'',pen_len:'',tool_yaw:'0',
+    draw_speed:d.draw_speed,travel_speed:d.travel_speed,approach_speed:d.approach_speed,zone:'z0',pen_up:d.pen_up,press:0,dry:0,
+    tol:'',rate:'40',target_frame:'auto',routine:'DrawImage',home_routine:'',home_joints:d.home_joints.join(','),conf:'',strict:false};}
+function loadSettings(){
+  if(!ROBOTS.length)return;
+  const id=selected(),v=robotDefaults(id);
+  try{Object.assign(v,JSON.parse(localStorage.getItem('abbplot.'+id)||'{}'));}catch(e){}
+  SET.forEach(k=>$('#s_'+k).value=v[k]);$('#s_strict').checked=!!v.strict;
+}
+function collectSettings(){const o={};SET.forEach(k=>o[k]=$('#s_'+k).value);o.strict=$('#s_strict').checked;return o;}
+function saveSettings(){try{localStorage.setItem('abbplot.'+selected(),JSON.stringify(collectSettings()));}catch(e){}}
+document.querySelectorAll('[id^=s_]').forEach(el=>el.addEventListener('change',saveSettings));
+$('#robots').addEventListener('change',loadSettings);
+let cadFiles=[];
+const cadName=k=>k?'link'+k:'base';
+const cadSummary=r=>'Loaded: '+(r.found.length?r.found.map(cadName).join(', '):'none')+'.'+(r.missing.length&&r.found.length?' Missing: '+r.missing.map(cadName).join(', ')+'.':'')+(r.skipped.length?' Ignored: '+r.skipped.join(', ')+'.':'');
+async function applyCad(){
+  if(!window.RobotSim||!cadFiles.length)return;
+  const r=await RobotSim.loadCad(selected(),cadFiles,{scale:+$('#cadScale').value,frame:$('#cadFrame').value});
+  $('#cadStatus').textContent=cadSummary(r);
+}
+$('#cad').onchange=async e=>{
+  cadFiles=await Promise.all([...e.target.files].map(async f=>({name:f.name,buf:await f.arrayBuffer()})));
+  applyCad();
+};
+$('#cadFrame').onchange=$('#cadScale').onchange=applyCad;
+$('#simulate').onclick=async()=>{
+  const rb=ROBOTS.find(r=>r.id===job.robot_id);
+  if(!rb.exact)return msg('No exact model for this robot yet, so the simulation cannot run.');
+  if(!window.THREE||!window.RobotSim)return msg('3D simulation could not load. Check your internet connection.');
+  $('#send').disabled=true;msg('Loading robot...');
+  if(!RobotSim.hasCad(rb.id)&&rb.cad){
+    const files=await Promise.all(Object.entries(rb.cad.files).map(async([name,url])=>({name,buf:await (await fetch(url)).arrayBuffer()})));
+    $('#cadStatus').textContent=cadSummary(await RobotSim.loadCad(rb.id,files,{scale:rb.cad.scale,frame:rb.cad.frame}));
+  }
+  $('#sim').hidden=false;msg('Simulating...');let issue='';
+  $('#resetView').disabled=false;
+  RobotSim.run($('#sim'),rb,job,{
+    onCheck:c=>{issue=[c.outOfReach?'part of the path is outside reach':'',c.limits.length?'joint limit exceeded on '+c.limits.join(', '):''].filter(Boolean).join('; ');},
+    onJoints:q=>{$('#joints').textContent=q.map((a,i)=>'J'+(i+1)+' '+a.toFixed(1)+'\u00b0').join('   ');},
+    onDone:()=>{
+      if(issue)return msg('Simulation finished, but '+issue+'. Sending stays locked until this is fixed.');
+      if(rb.verified)$('#send').disabled=false;
+      msg(rb.verified
+        ? (job.live?'Simulation finished with no reach or joint-limit problems. If it looks right, send to the robot.':'Simulation finished with no problems. Dry-run mode: Send will not reach a robot.')
+        : 'Simulation finished. GoFa uses approximate geometry, so sending remains locked until the model is calibrated.');
+    }});
+};
+$('#replay').onclick=()=>{
+  if(reduced)return draw(1);
+  const t0=performance.now(),dur=Math.min(12000,Math.max(3000,N*6));
+  const step=t=>{const p=Math.min(1,(t-t0)/dur);draw(p);if(p<1)requestAnimationFrame(step)};
+  requestAnimationFrame(step);
+};
+$('#resetView').onclick=()=>RobotSim&&RobotSim.resetView();
+async function post(path,body){
+  const r=await fetch(`/api/jobs/${job.job_id}/${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  const j=await r.json();msg(j.message||j.detail);return r.ok;
+}
+$('#send').onclick=async()=>{if(await post('send')){$('#start').disabled=false;$('#stop').disabled=false;}};
+$('#start').onclick=()=>{
+  if(confirm('Is the work area clear, the pen fitted, and are you ready to use the emergency stop?'))post('start',{confirm:true});
+};
+$('#stop').onclick=()=>post('stop');
+$('#overlay').onchange=()=>job&&draw(1);
+addEventListener('resize',()=>job&&draw(1));
+</script>
+</body>
+</html>
